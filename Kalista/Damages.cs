@@ -1,16 +1,15 @@
-﻿using EloBuddy;
+using EloBuddy;
 using EloBuddy.SDK;
 
 namespace Hellsing.Kalista
 {
-    public static class Damages
+    class Damages
     {
         public static readonly Damage.DamageSourceBoundle QDamage = new Damage.DamageSourceBoundle();
 
-          private static readonly float[] RawRendDamage = { 20, 30, 40, 50, 60 };
-          private static readonly float[] RawRendDamageMultiplier = { 0.6f, 0.6f, 0.6f, 0.6f, 0.6f };
-          private static readonly float[] RawRendDamagePerSpear = { 10, 14, 19, 25, 32 };
-          private static readonly float[] RawRendDamagePerSpearMultiplier = { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
+        private static readonly float[] RawRendDamage = { 20, 30, 40, 50, 60 };
+        private static readonly float[] RawRendDamagePerSpear = { 10, 14, 19, 25, 32 };
+        private static readonly float[] RawRendDamagePerSpearMultiplier = { 0.2f, 0.225f, 0.25f, 0.275f, 0.3f };
 
         static Damages()
         {
@@ -24,46 +23,18 @@ namespace Hellsing.Kalista
             });
         }
 
-        public static bool IsRendKillable(Obj_AI_Base target, float? damage = null)
+        public static float GetQDamage(Obj_AI_Base target)
         {
-            // Validate unit
-            if (target == null || !target.IsValidTarget() || !target.HasRendBuff())
-            {
-                return false;
-            }
+            if (!Spells.Q.IsReady()) return 0f;
 
-            // Take into account all kinds of shields
-            var totalHealth = target.TotalShieldHealth();
-
-            var hero = target as AIHeroClient;
-            if (hero != null)
-            {
-                // Validate that target has no undying buff or spellshield
-                if (hero.HasUndyingBuff() || hero.HasSpellShield())
-                {
-                    return false;
-                }
-
-                // Take into account Blitzcranks passive
-                if (hero.ChampionName == "Blitzcrank" && !target.HasBuff("BlitzcrankManaBarrierCD") && !target.HasBuff("ManaBarrier"))
-                {
-                    totalHealth += target.Mana / 2;
-                }
-            }
-
-            return (damage ?? GetRendDamage(target)) > totalHealth;
+            return Player.Instance.CalculateDamageOnUnit(target, DamageType.Physical,
+                    new float[] { 10, 70, 130, 190, 250 }[Spells.Q.Level - 1]
+                    + 1f * Player.Instance.TotalAttackDamage);
         }
 
-        public static float GetRendDamage(AIHeroClient target)
+        public static float GetRendDamage(Obj_AI_Base target)
         {
-            return GetRendDamage(target, -1);
-        }
-
-        public static float GetRendDamage(Obj_AI_Base target, int customStacks = -1, BuffInstance rendBuff = null)
-        {
-            // Calculate the damage and return
-            return Player.Instance.CalculateDamageOnUnit(target, DamageType.Physical, GetRawRendDamage(target, customStacks, rendBuff) - Config.Misc.DamageReductionE) *
-                   (Player.Instance.HasBuff("SummonerExhaustSlow") ? 0.6f : 1); // Take into account Exhaust, migh just add that to the SDK
+            return Player.Instance.CalculateDamageOnUnit(target, DamageType.Physical, GetRawRendDamage(target)) * 0.8f;
         }
 
         public static float GetRawRendDamage(Obj_AI_Base target)
@@ -72,9 +43,47 @@ namespace Hellsing.Kalista
             if (stacks > -1)
             {
                 var index = Spells.E.Level - 1;
-                return (RawRendDamage[index] + Player.Instance.TotalAttackDamage * (RawRendDamageMultiplier[index]) * (1+stacks * RawRendDamagePerSpearMultiplier[index]));
+                return (RawRendDamage[index] + (0.6f * Player.Instance.TotalAttackDamage)) + 
+                    ((stacks) * (RawRendDamagePerSpear[index] + (RawRendDamagePerSpearMultiplier[index] * Player.Instance.TotalAttackDamage)));
             }
+
             return 0;
+        }
+
+        public static float GetActualDamage(Obj_AI_Base target)
+        {
+            if (!Spells.E.IsReady() || !target.HasRendBuff()) return 0f;
+
+            var damage = GetRendDamage(target);
+
+            if (target.Name.Contains("Baron"))
+            {
+                // Buff Name: barontarget or barondebuff
+                // Baron's Gaze: Baron Nashor takes 50% reduced damage from champions he's damaged in the last 15 seconds. 
+                damage = Player.Instance.HasBuff("barontarget")
+                    ? damage * 0.5f
+                    : damage;
+            }
+
+            else if (target.Name.Contains("Dragon"))
+            {
+                // DragonSlayer: Reduces damage dealt by 7% per a stack
+                damage = Player.Instance.HasBuff("s5test_dragonslayerbuff")
+                    ? damage * (1 - (.07f * Player.Instance.GetBuffCount("s5test_dragonslayerbuff")))
+                    : damage;
+            }
+
+            if (Player.Instance.HasBuff("summonerexhaust"))
+            {
+                damage = damage * 0.6f;
+            }
+
+            if (target.HasBuff("FerociousHowl"))
+            {
+                damage = damage * 0.7f;
+            }
+
+            return damage;
         }
     }
 }
